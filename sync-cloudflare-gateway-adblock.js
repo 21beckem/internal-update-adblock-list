@@ -30,6 +30,7 @@ const HAGEZI_LIST = process.env.HAGEZI_LIST || 'pro.txt';
 
 const HAGEZI_LIST_BASE_URL = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/adblock/';
 
+const API_BATCH_SIZE = 10;
 const LIST_NAME_PREFIX = 'hagezi-adblock-'; // used to find + clean up our own lists
 const POLICY_NAME = 'Block Ads & Trackers (Hagezi)';
 const DOMAINS_PER_LIST = 1000; // Cloudflare's per-list item cap
@@ -46,6 +47,24 @@ if (!ACCOUNT_ID || !API_TOKEN) {
 }
 
 const API_BASE = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}`;
+
+async function batchWithDelay(asyncFns, batchSize, delayMs) {
+  const results = [];
+  
+  for (let i = 0; i < asyncFns.length; i += batchSize) {
+    const batch = asyncFns.slice(i, i + batchSize);
+    
+    const batchPromises = batch.map(fn => fn());
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+    
+    if (i + batchSize < asyncFns.length) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  
+  return results;
+}
 
 async function cfFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -175,19 +194,23 @@ async function main() {
   console.log(`Found ${staleLists.length} list(s) from a previous run to clean up afterward.`);
 
   const runId = Date.now();
-  const promises = chunks.map((chunk, i) => {
-    const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
-    return createList(name, chunk);
-  });
-
-  const newListIds = await Promise.all(promises);;
+  const newListIds = await batchWithDelay(
+    chunks.map((chunk, i) => {
+      const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
+      return () => createList(name, chunk);
+    }),
+    API_BATCH_SIZE,
+    1000
+  );
 
   // Point the policy at the new lists BEFORE deleting the old ones, so
   // there's never a gap where filtering is broken mid-sync.
   await upsertPolicy(newListIds);
 
-  await Promise.all(
-    staleLists.map(old => deleteList(old.id, old.name))
+  await batchWithDelay(
+    staleLists.map(old => { return () => deleteList(old.id, old.name); })
+    API_BATCH_SIZE,
+    1000
   );
 
   console.log('Sync complete.');
