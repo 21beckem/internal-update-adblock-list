@@ -22,18 +22,13 @@
 // Change this to switch blocklists, or override at runtime with the
 // HAGEZI_LIST environment variable (handy for testing a different list
 // without editing this file).
-const HAGEZI_LIST = process.env.HAGEZI_LIST || 'pro';
+const HAGEZI_LIST = process.env.HAGEZI_LIST || 'pro.txt';
 
 // Hagezi's "domains" format lists — plain domain-per-line, no wildcard/
 // adblock syntax, which is what Cloudflare Gateway domain lists expect.
 // See https://github.com/hagezi/dns-blocklists for details on each tier.
-const HAGEZI_LIST_URLS = {
-  light: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt',
-  normal: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/multi.txt',
-  pro: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt',
-  'pro-plus': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
-  ultimate: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/ultimate.txt',
-};
+
+const HAGEZI_LIST_BASE_URL = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/adblock/';
 
 const LIST_NAME_PREFIX = 'hagezi-adblock-'; // used to find + clean up our own lists
 const POLICY_NAME = 'Block Ads & Trackers (Hagezi)';
@@ -149,14 +144,7 @@ async function upsertPolicy(listIds) {
 }
 
 async function main() {
-  const url = HAGEZI_LIST_URLS[HAGEZI_LIST];
-  if (!url) {
-    console.error(
-      `Unknown HAGEZI_LIST "${HAGEZI_LIST}". Valid options: ${Object.keys(HAGEZI_LIST_URLS).join(', ')}`
-    );
-    process.exit(1);
-  }
-
+  const url = HAGEZI_LIST_BASE_URL + HAGEZI_LIST;
   const domains = await downloadDomainList(url);
   const chunks = chunkArray(domains, DOMAINS_PER_LIST);
 
