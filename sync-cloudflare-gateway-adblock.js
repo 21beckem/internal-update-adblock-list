@@ -151,6 +151,17 @@ async function deleteList(listId, name) {
   await cfFetch(`/gateway/lists/${listId}`, { method: 'DELETE' });
 }
 
+async function updateList(listId, name, domains) {
+  console.log(`Creating list "${name}" (${domains.length} domains)...`);
+  return cfFetch('/gateway/lists', {
+    method: 'PUT',
+    body: JSON.stringify({
+      type: 'DOMAIN',
+      items: domains.map((value) => ({ value })),
+    }),
+  });
+}
+
 async function upsertPolicy(listIds) {
   const traffic = listIds.map((id) => `any(dns.domains[*] in $${id})`).join(' or ');
 
@@ -181,6 +192,43 @@ async function upsertPolicy(listIds) {
   }
 }
 
+async function applyNewLists(chunks) {
+  const staleLists = await getExistingManagedLists();
+  console.log(`Found ${staleLists.length} list(s) from a previous run to adapt.`);
+  
+  const runId = Date.now();
+  function createUpsertMethod(chunk, i) {
+    if (staleLists.length < 1) {
+      // no more stale lists. Create new
+      const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
+      return () => createList(name, chunk);
+
+    } else {
+      // previous list can be used.
+      const listToUpdate = staleLists.shift();
+      const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
+      return () => updateList(listToUpdate.id, name, chunk);
+    }
+  }
+
+  const fullListIds = await batchWithDelay(
+    chunks.map(createUpsertMethod),
+    API_BATCH_SIZE,
+    1000
+  );
+
+  // clear out any old staleLists not being used anymore
+  if (staleLists.length > 0) {
+    await batchWithDelay(
+      staleLists.map(old => { return () => deleteList(old.id, old.name); }),
+      API_BATCH_SIZE,
+      1000
+    );
+  }
+
+  return fullListIds;
+}
+
 async function main() {
   const url = HAGEZI_LIST_BASE_URL + HAGEZI_LIST;
   const domains = await downloadDomainList(url);
@@ -188,30 +236,9 @@ async function main() {
   console.log(`Splitting into ${domains.length} domains into lists of ${DOMAINS_PER_LIST} max.`);
   const chunks = chunkArray(domains, DOMAINS_PER_LIST, MAX_LISTS);
 
-  // Snapshot the previous run's lists BEFORE creating new ones, so cleanup
-  // never touches anything we're about to create.
-  const staleLists = await getExistingManagedLists();
-  console.log(`Found ${staleLists.length} list(s) from a previous run to clean up afterward.`);
 
-  const runId = Date.now();
-  const newListIds = await batchWithDelay(
-    chunks.map((chunk, i) => {
-      const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
-      return () => createList(name, chunk);
-    }),
-    API_BATCH_SIZE,
-    1000
-  );
-
-  // Point the policy at the new lists BEFORE deleting the old ones, so
-  // there's never a gap where filtering is broken mid-sync.
+  const newListIds = await applyNewLists(chunks);
   await upsertPolicy(newListIds);
-
-  await batchWithDelay(
-    staleLists.map(old => { return () => deleteList(old.id, old.name); }),
-    API_BATCH_SIZE,
-    1000
-  );
 
   console.log('Sync complete.');
 }
