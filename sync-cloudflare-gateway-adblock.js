@@ -175,20 +175,20 @@ async function main() {
   console.log(`Found ${staleLists.length} list(s) from a previous run to clean up afterward.`);
 
   const runId = Date.now();
-  const newListIds = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const name = `${LIST_NAME_PREFIX}${runId}-${String(i).padStart(3, '0')}`;
-    const list = await createList(name, chunks[i]);
-    newListIds.push(list.id);
-  }
+  const promises = chunks.map((chunk, i) => {
+    const name = `${LIST_NAME_PREFIX}${runId}-${String(i+1).padStart(3, '0')}-of-${chunks.length}`;
+    return createList(name, chunk);
+  });
+
+  const newListIds = await Promise.all(promises);;
 
   // Point the policy at the new lists BEFORE deleting the old ones, so
   // there's never a gap where filtering is broken mid-sync.
   await upsertPolicy(newListIds);
 
-  for (const old of staleLists) {
-    await deleteList(old.id, old.name);
-  }
+  await Promise.all(
+    staleLists.map(old => deleteList(old.id, old.name))
+  );
 
   console.log('Sync complete.');
 }
