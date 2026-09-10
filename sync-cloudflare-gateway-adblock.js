@@ -63,6 +63,17 @@ async function cfFetch(path, options = {}) {
   return data.result;
 }
 
+function sanitizeDomain(line) {
+  line = line.trim();
+  if (!line || line.startsWith('[') || line.startsWith('!')) return null;
+
+  if (line.startsWith('||')) line = line.slice(2);
+  if (line.startsWith('|'))  line = line.slice(1);
+  if (line.endsWith('^'))    line = line.slice(0, -1);
+
+  return line;
+}
+
 async function downloadDomainList(url) {
   console.log(`Downloading blocklist: ${url}`);
   const res = await fetch(url);
@@ -72,8 +83,8 @@ async function downloadDomainList(url) {
   const text = await res.text();
   const domains = text
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('[') && !line.startsWith('!') );
+    .map(sanitizeDomain)
+    .filter(Boolean);
   console.log(`Downloaded ${domains.length} domains.`);
   return domains;
 }
