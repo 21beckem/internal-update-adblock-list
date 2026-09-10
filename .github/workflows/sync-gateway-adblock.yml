@@ -1,0 +1,26 @@
+name: Sync Cloudflare Gateway Adblock List
+
+on:
+  schedule:
+    # Runs daily at 6:00 AM UTC. Edit the cron expression to change timing.
+    - cron: '0 2 * * *'
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run sync script
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          HAGEZI_LIST: pro
+        run: node sync-cloudflare-gateway-adblock.js
