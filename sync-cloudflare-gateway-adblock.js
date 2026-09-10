@@ -48,10 +48,11 @@ if (!ACCOUNT_ID || !API_TOKEN) {
 
 const API_BASE = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}`;
 
-async function batchWithDelay(asyncFns, batchSize, delayMs) {
+async function batchWithDelay(asyncFns, batchSize=API_BATCH_SIZE, delayMs=2000) {
   const results = [];
   
   for (let i = 0; i < asyncFns.length; i += batchSize) {
+    const startMS = Date.now();
     const batch = asyncFns.slice(i, i + batchSize);
     
     const batchPromises = batch.map(fn => fn());
@@ -59,7 +60,10 @@ async function batchWithDelay(asyncFns, batchSize, delayMs) {
     results.push(...batchResults);
     
     if (i + batchSize < asyncFns.length) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      const timeTookAlready = Date.now()-startMS;
+      if (timeTookAlready >= delayMs) continue;
+
+      await new Promise(resolve => setTimeout(resolve, delayMs - timeTookAlready));
     }
   }
   
@@ -67,19 +71,23 @@ async function batchWithDelay(asyncFns, batchSize, delayMs) {
 }
 
 async function cfFetch(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json();
-  if (!res.ok || data.success === false) {
-    throw new Error(`Cloudflare API error on ${path}: ${JSON.stringify(data.errors || data)}`);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(JSON.stringify(data.errors || data));
+    }
+    return data.result;
+  } catch (err) {
+    throw new Error(`Cloudflare API error on ${path}${err.message ? ': '+err.message : ''}`);
   }
-  return data.result;
 }
 
 function sanitizeDomain(line) {
@@ -152,10 +160,11 @@ async function deleteList(listId, name) {
 }
 
 async function updateList(listId, name, domains) {
-  console.log(`Creating list "${name}" (${domains.length} domains)...`);
-  return cfFetch('/gateway/lists', {
+  console.log(`Updating list "${name}" (${domains.length} domains)...`);
+  return cfFetch(`/gateway/lists/${listId}`, {
     method: 'PUT',
     body: JSON.stringify({
+      name,
       type: 'DOMAIN',
       items: domains.map((value) => ({ value })),
     }),
@@ -211,22 +220,18 @@ async function applyNewLists(chunks) {
     }
   }
 
-  const fullListIds = await batchWithDelay(
-    chunks.map(createUpsertMethod),
-    API_BATCH_SIZE,
-    1000
+  const fullListOfLists = await batchWithDelay(
+    chunks.map(createUpsertMethod)
   );
 
   // clear out any old staleLists not being used anymore
   if (staleLists.length > 0) {
     await batchWithDelay(
       staleLists.map(old => { return () => deleteList(old.id, old.name); }),
-      API_BATCH_SIZE,
-      1000
     );
   }
 
-  return fullListIds;
+  return fullListOfLists;
 }
 
 async function main() {
@@ -237,8 +242,8 @@ async function main() {
   const chunks = chunkArray(domains, DOMAINS_PER_LIST, MAX_LISTS);
 
 
-  const newListIds = await applyNewLists(chunks);
-  await upsertPolicy(newListIds);
+  const newLists = await applyNewLists(chunks);
+  await upsertPolicy(newLists.map(list => list.id ?? list));
 
   console.log('Sync complete.');
 }
