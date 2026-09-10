@@ -208,7 +208,7 @@ async function main() {
   await upsertPolicy(newListIds);
 
   await batchWithDelay(
-    staleLists.map(old => { return () => deleteList(old.id, old.name); })
+    staleLists.map(old => { return () => deleteList(old.id, old.name); }),
     API_BATCH_SIZE,
     1000
   );
