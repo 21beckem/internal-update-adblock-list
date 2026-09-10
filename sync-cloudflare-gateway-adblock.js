@@ -73,15 +73,23 @@ async function downloadDomainList(url) {
   const domains = text
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
+    .filter((line) => line && !line.startsWith('[') && !line.startsWith('!') );
   console.log(`Downloaded ${domains.length} domains.`);
   return domains;
 }
 
-function chunkArray(array, size) {
+function chunkArray(array, size, maxNumOfChunks) {
   const chunks = [];
   for (let i = 0; i < array.length; i += size) {
     chunks.push(array.slice(i, i + size));
+  }
+  if (chunks.length > maxNumOfChunks) {
+    console.warn(
+      `This blocklist needs ${chunks.length} lists of ${size} domains each, ` +
+        `but the free-plan cap is ${maxNumOfChunks} lists.` +
+        `The last ${chunks.length - maxNumOfChunks} chunk(s) shall be removed to allow for this.`
+    );
+    chunks.splice(maxNumOfChunks + 1);
   }
   return chunks;
 }
@@ -146,18 +154,9 @@ async function upsertPolicy(listIds) {
 async function main() {
   const url = HAGEZI_LIST_BASE_URL + HAGEZI_LIST;
   const domains = await downloadDomainList(url);
-  const chunks = chunkArray(domains, DOMAINS_PER_LIST);
-
-  if (chunks.length > MAX_LISTS) {
-    console.error(
-      `This blocklist needs ${chunks.length} lists of ${DOMAINS_PER_LIST} domains each, ` +
-        `but the free-plan cap is ${MAX_LISTS} lists. Pick a smaller HAGEZI_LIST ` +
-        `(try "normal" or "light").`
-    );
-    process.exit(1);
-  }
-
+  
   console.log(`Splitting into ${chunks.length} list(s) of up to ${DOMAINS_PER_LIST} domains each.`);
+  const chunks = chunkArray(domains, DOMAINS_PER_LIST, MAX_LISTS);
 
   // Snapshot the previous run's lists BEFORE creating new ones, so cleanup
   // never touches anything we're about to create.
