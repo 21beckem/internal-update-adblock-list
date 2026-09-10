@@ -155,7 +155,7 @@ async function main() {
   const url = HAGEZI_LIST_BASE_URL + HAGEZI_LIST;
   const domains = await downloadDomainList(url);
   
-  console.log(`Splitting into ${chunks.length} list(s) of up to ${DOMAINS_PER_LIST} domains each.`);
+  console.log(`Splitting into ${domains.length} domains into lists of ${DOMAINS_PER_LIST} max.`);
   const chunks = chunkArray(domains, DOMAINS_PER_LIST, MAX_LISTS);
 
   // Snapshot the previous run's lists BEFORE creating new ones, so cleanup
